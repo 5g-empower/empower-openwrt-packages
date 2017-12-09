@@ -18,7 +18,10 @@ PKG_SOURCE_SUBDIR:=$(PKG_NAME)-$(PKG_VERSION)
 PKG_SOURCE_VERSION:=$(PKG_REV)
 PKG_SOURCE_PROTO:=git
 
+PKG_BUILD_DEPENDS:=empower-lvap-agent/host
+
 include $(INCLUDE_DIR)/package.mk
+include $(INCLUDE_DIR)/host-build.mk
 
 define Package/empower-lvap-agent
 	SECTION:=net
@@ -42,13 +45,30 @@ CONFIGURE_ARGS += \
 	--enable-empower \
 	--disable-linuxmodule \
 	--disable-dynamic-linking \
-	--enable-empsocket \
 
+HOST_CONFIGURE_ARGS += \
+	--enable-userlevel \
+	--enable-wifi \
+	--enable-empower \
+	--disable-linuxmodule \
 
-define Build/Configure
-  $(call Build/Configure/Default)
+define Host/Compile
+    $(call Host/Install/Default, tools elementmap.xml install)
 endef
 
+define Build/Compile
+	(cd $(PKG_BUILD_DIR)/userlevel; \
+		$(STAGING_DIR)/host/bin/click-mkmindriver -p $(PKG_NAME) \
+		-C $(STAGING_DIR)/host/ \
+		-f $(PKG_BUILD_DIR)/elements/empower/samples/empower.click \
+		-A --all -E Discard -E Print -E PrintWifi -E Strip -E Null \
+		-e SetTXRate -e SetTXRateHT -E ToDump -E RatedSource \
+		-E EtherEncap -E WifiEncap -E WifiDecap -E UDPIPEncap \
+		-E EmpowerIgmpMembership -E EmpowerMulticastTable \
+		-E MarkIPHeader -E EmpowerQOSManager -E EmpowerTee \
+	);
+	$(call Build/Install/Default, MINDRIVER=$(PKG_NAME) install)
+endef
 
 define Package/empower-lvap-agent/install
 	$(INSTALL_DIR) $(1)/usr/bin
@@ -61,9 +81,10 @@ define Package/empower-lvap-agent/install
 	$(INSTALL_BIN) ./files/empower_add_ports.sh $(1)/usr/bin/empower_add_ports.sh
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/conf/wifi/write_handler $(1)/usr/bin/
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/conf/wifi/read_handler $(1)/usr/bin/
-	$(CP) $(PKG_BUILD_DIR)/userlevel/click $(1)/usr/bin/click
+	$(CP) $(PKG_BUILD_DIR)/userlevel/$(PKG_NAME)click $(1)/usr/bin/click
 	$(CP) $(PKG_BUILD_DIR)/tools/click-align/click-align $(1)/usr/bin/click-align
 	$(CP) $(PKG_INSTALL_DIR)/usr/share/click/elementmap.xml $(1)/usr/share/click/elementmap.xml
 endef
 
+$(eval $(call HostBuild))
 $(eval $(call BuildPackage,empower-lvap-agent))
