@@ -63,6 +63,7 @@ define Package/empower-lvap-agent/install
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/conf/wifi/read_handler $(1)/usr/bin/
 	$(CP) $(PKG_BUILD_DIR)/userlevel/click $(1)/usr/bin/click
 	$(CP) $(PKG_BUILD_DIR)/tools/click-align/click-align $(1)/usr/bin/click-align
+	$(CP) $(PKG_INSTALL_DIR)/usr/share/click/elementmap.xml $(1)/usr/share/click/elementmap.xml
 endef
 
 $(eval $(call BuildPackage,empower-lvap-agent))
