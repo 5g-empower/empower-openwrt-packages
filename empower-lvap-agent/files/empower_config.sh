@@ -119,11 +119,13 @@ tee :: EmpowerTee($NUM_IFACES, EL el);
 switch_mngt :: PaintSwitch();
 """
 
+REGS=""
 RCS=""
 EQMS=""
 IDX=0
 for IFNAME in $IFNAMES; do
 
+  REGS="$REGS reg_$IDX"
   EQMS="$EQMS eqm_$IDX"
   RCS="$RCS rc_$IDX/rate_control"
   CHANNEL=$($IW dev $IFNAME info | sed -n 's/^.*channel \([0-9]*\) (\([0-9]*\) MHz).*/\1/p')
@@ -141,7 +143,8 @@ for IFNAME in $IFNAMES; do
     HT_RATES="0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15"
   fi
 
-  echo """rates_default_$IDX :: TransmissionPolicy(MCS \"$RATES\", HT_MCS \"$HT_RATES\");
+  echo """reg_$IDX :: EmpowerRegmon(EL el, IFACE_ID $IDX, DEBUGFS /sys/kernel/debug/ieee80211/phy$IDX/regmon);
+rates_default_$IDX :: TransmissionPolicy(MCS \"$RATES\", HT_MCS \"$HT_RATES\");
 rates_$IDX :: TransmissionPolicies(DEFAULT rates_default_$IDX);
 
 rc_$IDX :: RateControl(rates_$IDX);
@@ -191,6 +194,7 @@ ctrl :: Socket(TCP, $MASTER_IP, $MASTER_PORT, CLIENT true, VERBOSE true, RECONNE
                                 DEBUGFS \"$DEBUGFS\",
                                 ERS ers,
                                 EQMS \"$EQMS\",
+                                REGMONS \"$REGS\",
                                 DEBUG $DEBUG)
     -> ctrl;
 
