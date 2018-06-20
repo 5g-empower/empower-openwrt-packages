@@ -89,6 +89,7 @@ for IFNAME in $IFNAMES; do
 done
 
 WTP=$(/sbin/ifconfig $BRIDGE 2>&1 | sed -n 's/^.*HWaddr \([0-9A-Za-z\:]*\).*/\1/p')
+BRIDGE_DPID=$(ovs-ofctl show $BRIDGE | grep -o 'dpid.*' | cut -f2- -d:)
 
 NUM_IFACES=$(echo $IFNAMES | wc -w)
 
@@ -183,6 +184,7 @@ echo """kt :: KernelTap(10.0.0.1/24, BURST 500, DEV_NAME $VIRTUAL_IFNAME)
 
 ctrl :: Socket(TCP, $MASTER_IP, $MASTER_PORT, CLIENT true, VERBOSE true, RECONNECT_CALL el.reconnect)
     -> el :: EmpowerLVAPManager(WTP $WTP,
+                                BRIDGE_DPID $BRIDGE_DPID,
                                 EBS ebs,
                                 EAUTHR eauthr,
                                 EASSOR eassor,
