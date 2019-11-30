@@ -1,0 +1,26 @@
+diff --git a/elements/userlevel/todevice.cc b/elements/userlevel/todevice.cc
+index 58114e47b..2aeca80f5 100644
+--- a/elements/userlevel/todevice.cc
++++ b/elements/userlevel/todevice.cc
+@@ -46,7 +46,7 @@
+ # include <sys/socket.h>
+ # include <sys/ioctl.h>
+ # include <net/if.h>
+-# include <net/if_packet.h>
++// # include <net/if_packet.h>
+ # include <features.h>
+ # if __GLIBC__ >= 2 && __GLIBC_MINOR__ >= 1
+ #  include <netpacket/packet.h>
+diff --git a/include/click/llrpc.h b/include/click/llrpc.h
+index 601757ce0..aaa785a64 100644
+--- a/include/click/llrpc.h
++++ b/include/click/llrpc.h
+@@ -13,7 +13,7 @@ CLICK_CXX_UNPROTECT
+ # include <sys/ioccom.h>
+ #else
+ # include <errno.h>
+-# include <sys/ioctl.h>
++# include <linux/ioctl.h>
+ #endif
+ 
+ /* Click low-level RPC interface */

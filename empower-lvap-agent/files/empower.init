@@ -1,0 +1,207 @@
+#!/bin/sh /etc/rc.common
+# Copyright (c) 2019, Roberto Riggio
+#
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+#
+#   - Redistributions of source code must retain the above copyright
+#     notice, this list of conditions and the following disclaimer.
+#   - Redistributions in binary form must reproduce the above copyright
+#     notice, this list of conditions and the following disclaimer in
+#     the documentation and/or other materials provided with the
+#     distribution.
+#   - Neither the name of the CREATE-NET nor the names of its
+#     contributors may be used to endorse or promote products derived
+#     from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+# CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+# EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+# PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+# LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+# NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+START=99
+
+. /lib/functions.sh
+
+NAME="empower"
+PIDF=/var/run/empower.pid
+
+IFNAMES=""
+DEBUGFS=""
+
+append_ifname() {
+
+    local IFNAME
+    local MODE
+    local DEVICE
+    local CHANNEL
+    local HTMODE
+
+    logger -t "$NAME" "Checking interface $1."
+
+    # fetch wifi parameters
+    config_load wireless
+    config_get IFNAME $1 ifname
+    config_get MODE $1 mode
+
+    [ "x$IFNAME" = "x" ] && {
+        logger -t "$NAME" "Interface $IFNAME not available."
+        return 0
+    }
+
+    [ "$MODE" = "monitor" ] || {
+        logger -t "$NAME" "Device $IFNAME not monitor mode. Ignoring."
+        return 0
+    }
+
+    COUNT=0
+
+    # loop until the monitor interface is available, if after 10 seconds the
+    # interfaces is not available then ignore it
+    while [ 0 ]; do
+        if ifconfig $IFNAME >/dev/null 2>&1; then
+            logger -t "$NAME" "Interface $IFNAME found."
+            break
+        fi
+        if [ $COUNT -gt 10 ]; then
+            logger -t "$NAME" "Unable to find $IFNAME, exiting."
+            return 0
+        fi
+        sleep 1
+        COUNT=$((COUNT+1))
+        logger -t "$NAME" "Waiting for interface $IFNAME ($COUNT)."
+    done
+
+    config_get DEVICE $1 device
+    config_get CHANNEL $DEVICE channel "0"
+    config_get HTMODE $DEVICE htmode ""
+
+    [ "$CHANNEL" = "0" -o "$CHANNEL" = "auto" ] && {
+        logger -t "$NAME" "Channel not specified for interface $IFNAME. Ignoring."
+        return 0
+    }
+
+    DFS=$(find /sys/kernel/debug/ieee80211/ | grep "$IFNAME$")/../ath9k/bssid_extra
+
+    [ -f $DEBUGFS ] || {
+        logger -t "$NAME" "Debugfs not found $DEBUGFS. Ignoring."
+        return 0
+    }
+
+    # this is needed because sometimes the monitor interface is not immediatelly
+    # ready to accept configuration commands
+    sleep 2
+
+    # set monitor interface MTU
+    logger -t "$NAME" "Setting $IFNAME MTU to 2300."
+    ifconfig $IFNAME mtu 2300
+
+    # set monitor channel
+    logger -t "$NAME" "Setting $IFNAME channel to ${HTMODE} ${CHANNEL}."
+    iw dev $IFNAME set channel $CHANNEL $HTMODE
+
+    # bring monitor interface up
+    logger -t "$NAME" "Bringing $IFNAME up."
+    ifconfig $IFNAME up
+
+    IFNAMES="$IFNAMES $IFNAME"
+    DEBUGFS="$DEBUGFS $DFS"
+}
+
+start() {
+
+    # load config parameters
+    config_load empower
+    config_get MASTER_IP general master_ip
+    config_get MASTER_PORT general master_port "4433"
+    config_get INTERFACE general interface "empower0"
+    config_get NETWORK general network "wan"
+    config_get LOG general log "/dev/null"
+    config_get_bool DEBUG general debug false
+
+    config_list_foreach general ifname append_ifname
+
+    # fetch network parameters
+    config_load network
+    config_get BRIDGE $NETWORK ifname
+
+    # generate click config
+    logger -t "$NAME" "ip: $MASTER_IP"
+    logger -t "$NAME" "port: $MASTER_PORT"
+    logger -t "$NAME" "ifnames: $IFNAMES"
+    logger -t "$NAME" "debugfs: $DEBUGFS"
+    logger -t "$NAME" "virtual: $INTERFACE"
+
+    OPTS=""
+
+    [ $DEBUG == 1 ] && OPTS="$OPTS -d"
+
+    logger -t "$NAME" "Calling empower_config with: -o $BRIDGE -a $MASTER_IP -p $MASTER_PORT -i $IFNAMES -f $DEBUGFS -v $INTERFACE $OPTS"
+
+    empower_config.sh -o "$BRIDGE" -a "$MASTER_IP" -p "$MASTER_PORT" -i "$IFNAMES" -f "$DEBUGFS" -v "$INTERFACE" $OPTS > /tmp/empower.click 2>&1
+
+    # generate aligned version
+    /usr/bin/click-align /tmp/empower.click > /tmp/empower.aligned.click
+
+    # run click
+    (/usr/bin/click /tmp/empower.aligned.click > $LOG 2>&1 &)&
+
+    # give click some time to settle down
+    sleep 2
+
+    # save pid file
+    PID=$(ps | grep /usr/bin/click | grep -v grep | awk '{print $1}')
+
+    [ "x$PID" == "x" ] && {
+        logger -t "$NAME" "Unable to start click. Check logs."
+        return 0
+    }
+
+    echo $PID > $PIDF
+
+    # bring virtual ap interface ip
+    ifconfig $INTERFACE up
+
+    # give the interface some time to come up
+    sleep 2
+
+    # add virtual ap interface to bridge
+    ovs-vsctl add-port $BRIDGE $INTERFACE
+
+    # set the controller
+    ovs-vsctl set-controller $BRIDGE tcp:$MASTER_IP:6633
+
+}
+
+stop_click() {
+    [ -f $PIDF ] && {
+        kill -9 $(cat $PIDF)
+        rm $PIDF
+    }
+}
+
+stop() {
+    logger -t "$NAME" "Stopping..."
+    # load config parameters
+    config_load empower
+    config_get INTERFACE general interface "empower0"
+    config_get NETWORK general network "wan"
+    # fetch network parameters
+    config_load network
+    config_get BRIDGE $NETWORK ifname
+    # del virtual ap interface from bridge
+    ovs-vsctl del-port $BRIDGE $INTERFACE
+    # stop click
+    stop_click
+}
